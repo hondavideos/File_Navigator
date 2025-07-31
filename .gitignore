@@ -1,0 +1,6 @@
+# Large PDF files
+Data/PDFs/
+
+# Common OS files
+.DS_Store
+Thumbs.db
