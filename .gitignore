@@ -1,5 +1,6 @@
 # Large PDF files
 Data/PDFs/
+Data/STP_and_ZIPs/
 
 # Common OS files
 .DS_Store

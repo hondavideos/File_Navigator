@@ -1,48 +1,42 @@
-# New-OutlookEmail.ps1
-#
-# DESCRIPTION: Attaches a file to a new Outlook email using a pre-defined subject.
+<#
+    New-OutlookEmail.ps1 - v2.0
+    • Now checks for an active, open email window in Outlook.
+    • If an email is open, attaches the file to it.
+    • If no email is open, creates a new email with the file attached (original behavior).
+#>
 
-param(
-    # The Article Number, passed from the navigator script
+param (
     [string]$Article,
-
-    # The Type Key, passed from the navigator script (optional)
     [string]$TypeKey,
-
-    # The full path to the file to attach
-    [Parameter(Mandatory=$true, ValueFromRemainingArguments=$true)]
-    [string]$FilePath
+    [string[]]$Attachments
 )
 
 try {
-    # Validate the file path exists
-    if (-not (Test-Path $FilePath -PathType Leaf)) {
-        throw "File not found: $FilePath"
-    }
+    $Outlook = New-Object -ComObject Outlook.Application -ErrorAction Stop
+    $MailItem = $null
 
-    $outlook = New-Object -ComObject Outlook.Application
-    $mail = $outlook.CreateItem(0)
-
-    # --- NEW SUBJECT BUILDER ---
-    # Uses the accurate parts passed in from the navigator script.
-    if ($Article -and $TypeKey) {
-        $mail.Subject = "$Article - $TypeKey"
-    }
-    elseif ($Article) {
-        $mail.Subject = $Article
-    }
+    # --- CORE IMPROVEMENT ---
+    # Check for a currently active (open) email window first.
+    if ($Outlook.ActiveInspector()) {
+        $MailItem = $Outlook.ActiveInspector().CurrentItem
+    } 
     else {
-        # Fallback if for some reason no article was passed
-        $mail.Subject = [IO.Path]::GetFileNameWithoutExtension($FilePath)
+        # If no email is open, create a new one.
+        $MailItem = $Outlook.CreateItem(0) 
+        $MailItem.Subject = "$Article $TypeKey"
+    }
+    # --- END IMPROVEMENT ---
+
+    foreach ($file in $Attachments) {
+        if (Test-Path $file) {
+            $MailItem.Attachments.Add($file) | Out-Null
+            Write-Host "✓ File attached to Outlook email" -ForegroundColor Green
+        }
     }
 
-    # Attach the file.
-    $mail.Attachments.Add($FilePath)
-
-    $mail.Display()
+    $MailItem.Display()
+    Start-Sleep -Milliseconds 800
 }
 catch {
-    Write-Error "An error occurred in New-OutlookEmail.ps1: $($_.Exception.Message)"
-    Write-Host "This window will close in 20 seconds..."
-    Start-Sleep -Seconds 20
+    Write-Warning "Could not create Outlook email: $($_.Exception.Message)"
 }
