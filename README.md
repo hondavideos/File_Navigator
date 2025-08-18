@@ -19,6 +19,7 @@ This tool provides a fast, keyboard-driven interface to search for files in the 
         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
         ```
     *   This is a safe, one-time change that allows signed scripts (like this one) to run. You can now close the administrator window and run the navigator script normally.
+<img width="1116" height="630" alt="image" src="https://github.com/user-attachments/assets/6ed3d7ed-168a-468f-bc13-f07150890a49" />
 
 ## How to Use
 
