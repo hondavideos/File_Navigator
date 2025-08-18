@@ -24,9 +24,9 @@ This tool provides a fast, keyboard-driven interface to search for files in the 
 ## How to Use
 
 *   **Live Search:** Start typing to instantly filter the file list.
-*   **Switch Modes (`Ctrl+S`):** Press `Ctrl+S` to toggle between searching for PDFs and searching for STP/ZIP files.
+*   **Switch Modes (`Ctrl+T`):** Press `Ctrl+T` to toggle between searching for PDFs and searching for STP/ZIP files.
 *   **Navigate:** Use the `Up/Down` arrow keys to move the selection.
 *   **Attach to Email (`Enter`):** Press `Enter` on a selected file to create a new Outlook email with that file as an attachment.
 *   **Open File (`Ctrl+O`):** Press `Ctrl+O` to open the selected file in its default application.
 *   **Quick Select (`Ctrl` + `1-0`):** Press `Ctrl` and a number key to instantly select the corresponding file from the visible list.
-*   **Quit (`q`):** Press `q` to exit the navigator.
+*   **Quit (`Esc`):** Press `Esc` to exit the navigator.
