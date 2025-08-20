@@ -1,5 +1,7 @@
 <img width="1024" height="824" alt="STPigator" src="https://github.com/user-attachments/assets/29781f4b-d285-4fa3-94fe-9f79e4ec74a6" />
 
+![STPigator-output](https://github.com/user-attachments/assets/cc013616-3d67-41a8-856e-6d9302966bc1)
+
 This tool provides a fast, keyboard-driven interface to search for files in the `Data` directory and perform actions on them, like attaching them to an Outlook email or opening them directly.
 
 ## First-Time Setup
