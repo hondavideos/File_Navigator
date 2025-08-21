@@ -20,24 +20,52 @@ $SearchModes = @{
     PDFs = @{
         Path = Join-Path -Path $DataRoot -ChildPath 'PDFs'
         Filter = '*.pdf'
-        ArticleRegex = '(?<!\d)\d{6}(?:[A-Z]{1,2}|[/_][A-Z]\d{2})?(?!\d)'
+        ArticleRegex = '\b\d{6}(?:[\.\-_][A-Z0-9]{2,4}|[A-Z0-9]{1,3})\b'
         ArticleColour = 'Green'
+        TypeKeyRegex = '\b[A-Z]{2}\d{2,3}[A-Z0-9\-\.]*\b'
+        TypeKeyColour = 'Yellow'
     }
     STP_ZIPs = @{
         Path = Join-Path -Path $DataRoot -ChildPath 'STP_and_ZIPs'
         Filter = '*.stp', '*.zip'
-        ArticleRegex = '.*' # Match everything
-        ArticleColour = 'Yellow'
+        ArticleRegex = '\b\d{6}(?:[\.\-_][A-Z0-9]{2,4}|[A-Z0-9]{1,3})\b'
+        ArticleColour = 'Green'
+        TypeKeyRegex = '\b[A-Z]{2}\d{2,3}[A-Z0-9\-\.]*\b'
+        TypeKeyColour = 'Yellow'
+    }
+    Recent = @{
+        Path = ''
+        Filter = '*.*'
+        ArticleRegex = '\b\d{6}(?:[\.\-_][A-Z0-9]{2,4}|[A-Z0-9]{1,3})\b'
+        ArticleColour = 'Green'
+        TypeKeyRegex = '\b[A-Z]{2}\d{2,3}[A-Z0-9\-\.]*\b'
+        TypeKeyColour = 'Yellow'
     }
 }
 
 $currentMode = 'PDFs'
 $script:AllFiles = @{}
 
+# Recently accessed files tracking
+$HistoryFile = Join-Path $ScriptRoot "file_history.json"
+$script:FileHistory = @()
+if (Test-Path $HistoryFile) {
+    try {
+        $script:FileHistory = Get-Content $HistoryFile | ConvertFrom-Json
+    } catch {
+        $script:FileHistory = @()
+    }
+}
+
 # Pre-load files for both modes
 foreach ($modeName in $SearchModes.Keys) {
     $mode = $SearchModes[$modeName]
-    if (Test-Path -Path $mode.Path) {
+    if ($modeName -eq 'Recent') {
+        # Load recent files from history
+        $script:AllFiles[$modeName] = $script:FileHistory | ForEach-Object { 
+            if (Test-Path $_.FullName) { Get-Item $_.FullName }
+        } | Where-Object { $_ } | Sort-Object LastAccessTime -Descending
+    } elseif (Test-Path -Path $mode.Path) {
         $script:AllFiles[$modeName] = Get-ChildItem -Path $mode.Path -Recurse -Include $mode.Filter -File | Sort-Object Name
     }
     else {
@@ -47,32 +75,91 @@ foreach ($modeName in $SearchModes.Keys) {
 }
 
 # ── 3. Helpers ─────────────────────────────────────────────────────────────
+function Add-ToHistory {
+    param([IO.FileInfo]$File)
+    if (-not $File) { return }
+    
+    $historyEntry = @{
+        FullName = $File.FullName
+        BaseName = $File.BaseName
+        AccessTime = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+    }
+    
+    # Remove if already exists and add to front
+    $script:FileHistory = @($historyEntry) + ($script:FileHistory | Where-Object { $_.FullName -ne $File.FullName }) | Select-Object -First 20
+    
+    # Save to file
+    try {
+        $script:FileHistory | ConvertTo-Json | Out-File $HistoryFile -Encoding UTF8
+        # Refresh recent files list
+        $script:AllFiles.Recent = $script:FileHistory | ForEach-Object { 
+            if (Test-Path $_.FullName) { Get-Item $_.FullName }
+        } | Where-Object { $_ } | Sort-Object LastAccessTime -Descending
+    } catch {
+        # Silently ignore save errors
+    }
+}
+
 function Parse-Parts {
     param([string]$Base, [string]$Regex)
     $m = [regex]::Match($Base, $Regex)
     $article = if ($m.Success) { $m.Value } else { '' }
-    [PSCustomObject] @{ Article = $article; TypeKey = '' }
+    
+    # Extract TypeKey from the filename after the article number
+    $typeKey = ''
+    if ($article -and $Base.Contains($article)) {
+        $afterArticle = $Base.Substring($Base.IndexOf($article) + $article.Length).Trim()
+        # Extract meaningful part (remove common suffixes like " - Alex", "_en", "_gb", etc.)
+        $typeKey = $afterArticle -replace '\s*-\s*Alex.*$', '' -replace '_en$', '' -replace '_gb$', '' -replace '_belmore.*$', ''
+        $typeKey = $typeKey.Trim(' -')
+        # Limit length for email subjects
+        if ($typeKey.Length -gt 50) {
+            $typeKey = $typeKey.Substring(0, 47) + "..."
+        }
+    }
+    
+    [PSCustomObject] @{ Article = $article; TypeKey = $typeKey }
 }
 
 function Open-File {
     param([IO.FileInfo]$File)
     if (-not $File -or -not $File.FullName) { return }
+    Add-ToHistory $File
     try { Invoke-Item -Path $File.FullName } catch { Write-Warning $_.Exception.Message }
 }
 
 function Select-File {
     param([IO.FileInfo]$File)
-    if (-not $File -or -not $File.FullName) { return }
+    if (-not $File -or -not $File.FullName) { 
+        Write-Host "Error: No file selected" -ForegroundColor Red
+        Start-Sleep -Milliseconds 1500
+        return 
+    }
+    
+    Add-ToHistory $File
     $parts = Parse-Parts $File.BaseName $SearchModes[$currentMode].ArticleRegex
     $outlookScriptPath = Join-Path $ScriptRoot 'New-OutlookEmail.ps1'
+    
     if (Test-Path $outlookScriptPath) {
-        & $outlookScriptPath -Article $parts.Article -TypeKey $parts.TypeKey $File.FullName
+        Write-Host "Attaching file to Outlook..." -ForegroundColor Yellow
+        try {
+            & $outlookScriptPath -Article $parts.Article -TypeKey $parts.TypeKey $File.FullName
+            Write-Host "File attached successfully!" -ForegroundColor Green
+            Start-Sleep -Milliseconds 1500
+        }
+        catch {
+            Write-Host "Error attaching file: $($_.Exception.Message)" -ForegroundColor Red
+            Start-Sleep -Milliseconds 2000
+        }
     }
-    else { Write-Warning "Could not find '$outlookScriptPath'." }
+    else { 
+        Write-Host "Error: Could not find '$outlookScriptPath'." -ForegroundColor Red
+        Start-Sleep -Milliseconds 1500
+    }
 }
 
 function Draw-Line {
-    param($BaseName, $IsSel, $WinW, $ViewportRow, $Regex, $Colour)
+    param($BaseName, $IsSel, $WinW, $ViewportRow, $ArticleRegex, $ArticleColour, $TypeKeyRegex, $TypeKeyColour)
     $fg0,$bg0 = [Console]::ForegroundColor,[Console]::BackgroundColor
     if ($IsSel) { $rowFg = 'Black'; $rowBg = 'White' } else { $rowFg = 'Gray'; $rowBg = 'Black' }
 
@@ -86,12 +173,49 @@ function Draw-Line {
     $numColor = if ($IsSel) { 'DarkBlue' } else { 'Yellow' }
     Write-Host -NoNewline $prefix -ForegroundColor $numColor -BackgroundColor $rowBg
 
-    $m=[regex]::Match($fileTxt,$Regex)
-    if ($m.Success) {
-        Write-Host -NoNewline $fileTxt.Substring(0,$m.Index) -ForegroundColor $rowFg -BackgroundColor $rowBg
-        $fgArt = if ($IsSel) { 'DarkRed' } else { $Colour }
-        Write-Host -NoNewline $m.Value -ForegroundColor $fgArt -BackgroundColor $rowBg
-        Write-Host -NoNewline $fileTxt.Substring($m.Index+$m.Length) -ForegroundColor $rowFg -BackgroundColor $rowBg
+    # Find all matches for both article numbers and type keys
+    $articleMatches = [regex]::Matches($fileTxt, $ArticleRegex)
+    $typeKeyMatches = [regex]::Matches($fileTxt, $TypeKeyRegex)
+    
+    # Combine and sort all matches by position
+    $allMatches = @()
+    foreach ($match in $articleMatches) {
+        $allMatches += @{ Match = $match; Type = 'Article'; Color = if ($IsSel) { 'DarkRed' } else { $ArticleColour } }
+    }
+    foreach ($match in $typeKeyMatches) {
+        # Only add if it doesn't overlap with an article number
+        $overlaps = $false
+        foreach ($articleMatch in $articleMatches) {
+            if (($match.Index -lt ($articleMatch.Index + $articleMatch.Length)) -and 
+                (($match.Index + $match.Length) -gt $articleMatch.Index)) {
+                $overlaps = $true
+                break
+            }
+        }
+        if (-not $overlaps) {
+            $allMatches += @{ Match = $match; Type = 'TypeKey'; Color = if ($IsSel) { 'DarkYellow' } else { $TypeKeyColour } }
+        }
+    }
+    
+    # Sort matches by position
+    $allMatches = $allMatches | Sort-Object { $_.Match.Index }
+    
+    if ($allMatches.Count -gt 0) {
+        $currentPos = 0
+        foreach ($matchInfo in $allMatches) {
+            $match = $matchInfo.Match
+            # Write text before match
+            if ($match.Index -gt $currentPos) {
+                Write-Host -NoNewline $fileTxt.Substring($currentPos, $match.Index - $currentPos) -ForegroundColor $rowFg -BackgroundColor $rowBg
+            }
+            # Write highlighted match
+            Write-Host -NoNewline $match.Value -ForegroundColor $matchInfo.Color -BackgroundColor $rowBg
+            $currentPos = $match.Index + $match.Length
+        }
+        # Write remaining text
+        if ($currentPos -lt $fileTxt.Length) {
+            Write-Host -NoNewline $fileTxt.Substring($currentPos) -ForegroundColor $rowFg -BackgroundColor $rowBg
+        }
     } else {
         Write-Host -NoNewline $fileTxt -ForegroundColor $rowFg -BackgroundColor $rowBg
     }
@@ -114,7 +238,14 @@ function Write-StatusBar {
     [Console]::BackgroundColor='DarkCyan'
     
     # Determine the next mode for the help text
-    $nextModeName = if ($currentModeName -eq 'PDFs') { 'STP/ZIP' } else { 'PDF' }
+    $modes = @('PDFs', 'STP_ZIPs', 'Recent')
+    $currentIndex = $modes.IndexOf($currentModeName)
+    $nextIndex = ($currentIndex + 1) % $modes.Length
+    $nextModeName = switch ($modes[$nextIndex]) {
+        'PDFs' { 'PDF' }
+        'STP_ZIPs' { 'STP/ZIP' }
+        'Recent' { 'Recent' }
+    }
     $switchText = "Ctrl+T: Switch to $nextModeName"
 
     # Build status bar with color segments
@@ -145,7 +276,13 @@ function Write-StatusBar {
 
 function Update-SearchResults {
     $script:Files = if ($script:searchTerm) { 
-        @($script:AllFiles[$currentMode].Where({$_.Name -like "*$script:searchTerm*"})) 
+        # Support wildcard patterns (?, *, etc.) - if contains wildcards, use as-is
+        if ($script:searchTerm -match '[\?\*]') {
+            @($script:AllFiles[$currentMode].Where({$_.Name -like $script:searchTerm}))
+        } else {
+            # Default: wrap with wildcards for partial matching
+            @($script:AllFiles[$currentMode].Where({$_.Name -like "*$script:searchTerm*"}))
+        }
     } else { 
         $script:AllFiles[$currentMode] 
     }
@@ -201,7 +338,7 @@ try {
                     # Position cursor manually for each row
                     [Console]::SetCursorPosition(0, $headerRows + $r)
                     $mode = $SearchModes[$currentMode]
-                    Draw-Line $script:Files[$fileIndex].BaseName ($fileIndex -eq $script:cur) $w $r $mode.ArticleRegex $mode.ArticleColour
+                    Draw-Line $script:Files[$fileIndex].BaseName ($fileIndex -eq $script:cur) $w $r $mode.ArticleRegex $mode.ArticleColour $mode.TypeKeyRegex $mode.TypeKeyColour
                 } elseif ($fileIndex -eq 0 -and -not $script:Files) {
                     # Show "no files" message in center
                     $msg = "No files match '$($script:searchTerm)'"
@@ -238,10 +375,16 @@ try {
         elseif ($isCtrl -and $vk -eq 68) { $script:cur=[Math]::Min($script:Files.Count-1, $script:cur + [int]($rowsAvailable/2)) } # Ctrl+D (Down 1/2)
         elseif ($isCtrl -and $vk -eq 85) { $script:cur=[Math]::Max(0, $script:cur - [int]($rowsAvailable/2)) } # Ctrl+U (Up 1/2)
         elseif ($vk -eq 13) { if($script:Files) { Select-File $script:Files[$script:cur] }; $needsRedraw = $false } # Enter
-        elseif ($vk -eq 27 -or ($isCtrl -and $vk -eq 67)) { exit } # Esc or Ctrl+C
+        elseif ($vk -eq 27) { exit } # Esc only
         elseif ($vk -eq 8)  { if ($script:searchTerm.Length -gt 0) { $script:searchTerm = $script:searchTerm.Substring(0, $script:searchTerm.Length - 1); Update-SearchResults } else { $needsRedraw = $false } } # Backspace
         elseif ($isCtrl -and $vk -eq 81) { exit } # Ctrl+Q
-        elseif ($isCtrl -and $vk -eq 84) { $currentMode = if ($currentMode -eq 'PDFs') { 'STP_ZIPs' } else { 'PDFs' }; Update-SearchResults } # Ctrl+T
+        elseif ($isCtrl -and $vk -eq 84) { # Ctrl+T - cycle through modes
+            $modes = @('PDFs', 'STP_ZIPs', 'Recent')
+            $currentIndex = $modes.IndexOf($currentMode)
+            $nextIndex = ($currentIndex + 1) % $modes.Length
+            $currentMode = $modes[$nextIndex]
+            Update-SearchResults
+        }
         elseif ($isCtrl -and $vk -eq 79) { if ($script:Files) { Open-File $script:Files[$script:cur] }; $needsRedraw = $false } # Ctrl+O
         elseif ($isCtrl -and $vk -ge 48 -and $vk -le 57) { # Ctrl+0-9
             if ($script:Files) { $num = if ($vk -eq 48) { 9 } else { $vk - 49 }; $fileIdx = $script:top + $num; if ($fileIdx -lt $script:Files.Count) { Select-File $script:Files[$fileIdx] }}; $needsRedraw = $false
