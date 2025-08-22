@@ -119,7 +119,7 @@ If you see a PowerShell execution policy error when running `STPigator.bat`:
    ```
 3. **Close PowerShell** and run STPigator normally
 
-<img width="1116" height="630" alt="Execution Policy Setup" src="https://github.com/user-attachments/assets/6ed3d7ed-168a-468f-bc13-f07150890a49" />
+<img width="1087" height="581" alt="image" src="https://github.com/user-attachments/assets/2a69c3ef-6bb9-4d52-9868-a4ce904072b2" />
 
 ### Common Issues
 
@@ -157,3 +157,4 @@ If you see a PowerShell execution policy error when running `STPigator.bat`:
 ---
 
 **Need help?** Open an issue on GitHub or check the [troubleshooting section](#-troubleshooting).
+
