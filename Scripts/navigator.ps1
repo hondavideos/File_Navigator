@@ -20,7 +20,7 @@ $SearchModes = @{
     PDFs = @{
         Path = Join-Path -Path $DataRoot -ChildPath 'PDFs'
         Filter = '*.pdf'
-        ArticleRegex = '\b\d{6}(?:[\.\-_][A-Z0-9]{2,4}|[A-Z0-9]{1,3})\b'
+        ArticleRegex = '(?<=\b)\d{6}(?:[._-][A-Za-z0-9]+)?(?=\s|$|\b)'
         ArticleColour = 'Green'
         TypeKeyRegex = '\b[A-Z]{2}\d{2,3}[A-Z0-9\-\.]*\b'
         TypeKeyColour = 'Yellow'
@@ -28,7 +28,7 @@ $SearchModes = @{
     STP_ZIPs = @{
         Path = Join-Path -Path $DataRoot -ChildPath 'STP_and_ZIPs'
         Filter = '*.stp', '*.zip'
-        ArticleRegex = '\b\d{6}(?:[\.\-_][A-Z0-9]{2,4}|[A-Z0-9]{1,3})\b'
+        ArticleRegex = '(?<=\b)\d{6}(?:[._-][A-Za-z0-9]+)?(?=\s|$|\b)'
         ArticleColour = 'Green'
         TypeKeyRegex = '\b[A-Z]{2}\d{2,3}[A-Z0-9\-\.]*\b'
         TypeKeyColour = 'Yellow'
@@ -36,7 +36,7 @@ $SearchModes = @{
     Recent = @{
         Path = ''
         Filter = '*.*'
-        ArticleRegex = '\b\d{6}(?:[\.\-_][A-Z0-9]{2,4}|[A-Z0-9]{1,3})\b'
+        ArticleRegex = '(?<=\b)\d{6}(?:[._-][A-Za-z0-9]+)?(?=\s|$|\b)'
         ArticleColour = 'Green'
         TypeKeyRegex = '\b[A-Z]{2}\d{2,3}[A-Z0-9\-\.]*\b'
         TypeKeyColour = 'Yellow'
@@ -100,6 +100,29 @@ function Add-ToHistory {
     }
 }
 
+function Try-OutlookAttach {
+    param([IO.FileInfo]$File, [string]$Article, [string]$TypeKey)
+    
+    $outlookScriptPath = Join-Path $ScriptRoot 'New-OutlookEmail.ps1'
+    
+    # Quick checks before attempting
+    if (-not (Test-Path $outlookScriptPath)) {
+        Write-Host "Outlook script not found - opening file..." -ForegroundColor Yellow
+        return $false
+    }
+    
+    try {
+        # FIX: Explicitly name the -Attachments parameter for robust binding.
+        $null = & $outlookScriptPath -Article $Article -TypeKey $TypeKey -Attachments $File.FullName -ErrorAction Stop
+        return $true
+    }
+    catch {
+        # Silent failure - just return false
+        Write-Host "Outlook unavailable - opening file..." -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Parse-Parts {
     param([string]$Base, [string]$Regex)
     $m = [regex]::Match($Base, $Regex)
@@ -138,24 +161,72 @@ function Select-File {
     
     Add-ToHistory $File
     $parts = Parse-Parts $File.BaseName $SearchModes[$currentMode].ArticleRegex
-    $outlookScriptPath = Join-Path $ScriptRoot 'New-OutlookEmail.ps1'
     
-    if (Test-Path $outlookScriptPath) {
-        Write-Host "Attaching file to Outlook..." -ForegroundColor Yellow
-        try {
-            & $outlookScriptPath -Article $parts.Article -TypeKey $parts.TypeKey $File.FullName
-            Write-Host "File attached successfully!" -ForegroundColor Green
-            Start-Sleep -Milliseconds 1500
-        }
-        catch {
-            Write-Host "Error attaching file: $($_.Exception.Message)" -ForegroundColor Red
-            Start-Sleep -Milliseconds 2000
-        }
+    # Try Outlook first, fallback to opening file
+    $outlookSuccess = Try-OutlookAttach $File $parts.Article $parts.TypeKey
+    
+    if (-not $outlookSuccess) {
+        Write-Host "Opening file directly..." -ForegroundColor Cyan
+        Open-File $File
     }
-    else { 
-        Write-Host "Error: Could not find '$outlookScriptPath'." -ForegroundColor Red
-        Start-Sleep -Milliseconds 1500
+}
+
+function Invoke-FileDelete {
+    param([IO.FileInfo]$File)
+    if (-not $File) { return }
+    
+    try {
+        # Move to Recycle Bin (safer than permanent delete)
+        Add-Type -AssemblyName Microsoft.VisualBasic
+        [Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile(
+            $File.FullName,
+            'OnlyErrorDialogs',
+            'SendToRecycleBin'
+        )
+        
+        # Show brief confirmation at bottom
+        $w = $Host.UI.RawUI.WindowSize.Width
+        $h = $Host.UI.RawUI.WindowSize.Height
+        [Console]::SetCursorPosition(0, $h-1)
+        [Console]::BackgroundColor = 'DarkRed'
+        [Console]::ForegroundColor = 'White'
+        Write-Host "File deleted: $($File.Name)".PadRight($w-1)
+        [Console]::ResetColor()
+        Start-Sleep -Milliseconds 1200
+        
+        # Refresh file list and update cursor position
+        Update-FileListAfterDelete $File
+        
+    } catch {
+        # Show error at bottom
+        $w = $Host.UI.RawUI.WindowSize.Width
+        $h = $Host.UI.RawUI.WindowSize.Height
+        [Console]::SetCursorPosition(0, $h-1)
+        [Console]::BackgroundColor = 'DarkRed'
+        [Console]::ForegroundColor = 'White'
+        Write-Host "Delete failed: $($_.Exception.Message)".PadRight($w-1)
+        [Console]::ResetColor()
+        Start-Sleep -Milliseconds 2000
     }
+}
+
+function Update-FileListAfterDelete {
+    param([IO.FileInfo]$DeletedFile)
+    
+    # Remove from current file list
+    $oldIndex = $script:cur
+    $script:AllFiles[$currentMode] = $script:AllFiles[$currentMode] | Where-Object { $_.FullName -ne $DeletedFile.FullName }
+    
+    # Update search results
+    Update-SearchResults
+    
+    # Smart cursor repositioning
+    if ($script:Files.Count -eq 0) {
+        $script:cur = 0
+    } elseif ($oldIndex -ge $script:Files.Count) {
+        $script:cur = $script:Files.Count - 1  # Move to last file
+    }
+    # If oldIndex < Count, cursor stays at same position (shows next file)
 }
 
 function Draw-Line {
@@ -250,7 +321,7 @@ function Write-StatusBar {
 
     # Build status bar with color segments
     $prefix = "{0}/{1} | " -f ($cur+1), $tot
-    $suffix = " | Ctrl+U/D: Page ½ | Ctrl+O: Open | Enter: Attach to Outlook Msg | Ctrl+Q: Quit"
+    $suffix = " | Ctrl+U/D: Page ½ | Ctrl+O: Open | Enter: Add to Outlook | Delete: Remove File | Ctrl+Q: Quit"
     $totalLength = $prefix.Length + $switchText.Length + $suffix.Length
     
     if ($totalLength -gt ($w - 1)) {
@@ -275,16 +346,16 @@ function Write-StatusBar {
 }
 
 function Update-SearchResults {
-    $script:Files = if ($script:searchTerm) { 
-        # Support wildcard patterns (?, *, etc.) - if contains wildcards, use as-is
-        if ($script:searchTerm -match '[\?\*]') {
-            @($script:AllFiles[$currentMode].Where({$_.Name -like $script:searchTerm}))
+    $script:Files = if ($script:searchTerm) {
+        $patternString = if ($script:searchTerm -match '[*?]') {
+            $script:searchTerm
         } else {
-            # Default: wrap with wildcards for partial matching
-            @($script:AllFiles[$currentMode].Where({$_.Name -like "*$script:searchTerm*"}))
+            "*$($script:searchTerm)*"
         }
-    } else { 
-        $script:AllFiles[$currentMode] 
+        $pattern = [System.Management.Automation.WildcardPattern]::new($patternString, 'IgnoreCase')
+        @($script:AllFiles[$currentMode] | Where-Object { $pattern.IsMatch($_.Name) })
+    } else {
+        $script:AllFiles[$currentMode]
     }
     $script:cur = 0
     $script:top = 0
@@ -388,6 +459,12 @@ try {
         elseif ($isCtrl -and $vk -eq 79) { if ($script:Files) { Open-File $script:Files[$script:cur] }; $needsRedraw = $false } # Ctrl+O
         elseif ($isCtrl -and $vk -ge 48 -and $vk -le 57) { # Ctrl+0-9
             if ($script:Files) { $num = if ($vk -eq 48) { 9 } else { $vk - 49 }; $fileIdx = $script:top + $num; if ($fileIdx -lt $script:Files.Count) { Select-File $script:Files[$fileIdx] }}; $needsRedraw = $false
+        }
+        elseif ($vk -eq 46) { # Delete key
+            if ($script:Files) { 
+                Invoke-FileDelete $script:Files[$script:cur]
+            }
+            $needsRedraw = $false
         }
         elseif (-not [char]::IsControl($k.Character)) {
             $script:searchTerm += $k.Character
