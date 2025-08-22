@@ -1,4 +1,4 @@
-<img width="1024" height="824" alt="STPigator" src="https://github.com/user-attachments/assets/29781f4b-d285-4fa3-94fe-9f79e4ec74a6" />
+<img width="524" height="324" alt="STPigator" src="https://github.com/user-attachments/assets/29781f4b-d285-4fa3-94fe-9f79e4ec74a6" />
 
 ![STPigator-output](https://github.com/user-attachments/assets/cc013616-3d67-41a8-856e-6d9302966bc1)
 
