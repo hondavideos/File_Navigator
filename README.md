@@ -1,4 +1,5 @@
-<img width="524" height="324" alt="STPigator" src="https://github.com/user-attachments/assets/29781f4b-d285-4fa3-94fe-9f79e4ec74a6" />
+![20250821_2112_STPigator Logo Reveal_simple_compose_01k3746c61ffbs72yfxqdjr017](https://github.com/user-attachments/assets/7144dda6-cdde-4f36-b6d6-7dc8b4771de9)
+
 
 ![STPigator-output](https://github.com/user-attachments/assets/cc013616-3d67-41a8-856e-6d9302966bc1)
 
